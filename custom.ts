@@ -391,6 +391,59 @@ namespace iBITRobot {
         iBIT.MotorStop()
     }
 
+    // เงื่อนไขเจอแยกตามชนิดที่เลือก
+    function junctionFound(find: IR_Find): boolean {
+        let l = isLine(junctionLeft)
+        let r = isLine(junctionRight)
+        if (find == IR_Find.Left) return l
+        if (find == IR_Find.Right) return r
+        return l && r
+    }
+
+    /**
+     * วิ่งตามเส้นและนับแยกที่เลือก หยุดเมื่อเจอแยกครบตามจำนวน (Count)
+     * ถ้าเริ่มบนแยกอยู่แล้ว จะไม่นับแยกนั้น
+     * Left = ADC0 เจอเส้น, Right = ADC7 เจอเส้น, Center = ทั้งสองตัวเจอเส้น
+     */
+    //% blockId=ir_findcount block="Find %find|Count %count|Min Speed %minSpeed|Max Speed %maxSpeed|KP %kp|KD %kd"
+    //% count.min=1 count.defl=2
+    //% minSpeed.min=0 minSpeed.max=100 minSpeed.defl=50
+    //% maxSpeed.min=0 maxSpeed.max=100 maxSpeed.defl=100
+    //% kp.defl=0.012 kd.defl=0.15
+    //% inlineInputMode=inline
+    //% group="Line Follower" weight=84
+    export function findCount(find: IR_Find, count: number, minSpeed: number, maxSpeed: number, kp: number, kd: number): void {
+        resetPD()
+        let found = 0
+        // ถ้าเริ่มบนแยก ให้วิ่งจนพ้นแยกก่อน (ไม่นับ)
+        while (junctionFound(find)) {
+            pdStep(minSpeed, maxSpeed, kp, kd)
+            basic.pause(1)
+        }
+        while (found < count) {
+            if (junctionFound(find)) {
+                found += 1
+                if (found >= count) {
+                    break
+                }
+                // ยังไม่ครบ: วิ่งต่อจนพ้นแยกนี้ แล้ววิ่งต่ออีก 30 ms กันนับซ้ำ
+                while (junctionFound(find)) {
+                    pdStep(minSpeed, maxSpeed, kp, kd)
+                    basic.pause(1)
+                }
+                let t = input.runningTime()
+                while (input.runningTime() - t < 30) {
+                    pdStep(minSpeed, maxSpeed, kp, kd)
+                    basic.pause(1)
+                }
+            } else {
+                pdStep(minSpeed, maxSpeed, kp, kd)
+                basic.pause(1)
+            }
+        }
+        iBIT.MotorStop()
+    }
+
     /**
      * วิ่งตามเส้นตามเวลาที่กำหนด (ms) แล้วหยุด
      */
