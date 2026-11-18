@@ -88,35 +88,63 @@ enum IR_Servo {
 //% color="#51cb57" icon="" block="iBIT Robot"
 //% groups='["Motor Control", "Servo Control", "Sensor and ADC", "Line Follower", "Gripper"]'
 namespace iBITRobot {
-    const CH: ibitReadADC[] = [
-        ibitReadADC.ADC0, ibitReadADC.ADC1, ibitReadADC.ADC2, ibitReadADC.ADC3,
-        ibitReadADC.ADC4, ibitReadADC.ADC5, ibitReadADC.ADC6, ibitReadADC.ADC7
-    ]
-    const ON_LINE = 500          // ค่าที่ถือว่าเห็นเส้น (0–1000) เหมือน PTKidsBiT
-    const CENTER_COUNT = 6       // Find Center: เห็นเส้นอย่างน้อยกี่ตัวจาก 8
+    // MakeCode อาจรันโค้ด on start ของผู้ใช้ก่อนบรรทัดตั้งค่าตัวแปรในไฟล์นี้
+    // จึงประกาศตัวแปรไว้เฉยๆ แล้วตั้งค่าเริ่มต้นใน initState() ซึ่งทุกบล็อกเรียกก่อนทำงาน
+    let CH: ibitReadADC[]
+    let ON_LINE: number          // ค่าที่ถือว่าเห็นเส้น (0–1000) เหมือน PTKidsBiT
+    let CENTER_COUNT: number     // Find Center: เห็นเส้นอย่างน้อยกี่ตัวจาก 8
 
     // ค่าเส้น (Color Line) และพื้น (Color Ground) ของเซนเซอร์แต่ละตัว
-    let LINE = [4095, 4095, 4095, 4095, 4095, 4095, 4095, 4095]
-    let GROUND = [0, 0, 0, 0, 0, 0, 0, 0]
+    let LINE: number[]
+    let GROUND: number[]
     // ค่าเซนเซอร์ล่าสุด 0 (พื้น) – 1000 (เส้น)
-    let V = [0, 0, 0, 0, 0, 0, 0, 0]
+    let V: number[]
 
-    let pdFirst = 1
-    let pdLast = 6
-    let previousError = 0
-    let lastPos = 2500
-    let started = false
+    let pdFirst: number
+    let pdLast: number
+    let previousError: number
+    let lastPos: number
+    let started: boolean
 
     // ส่วนเสริม (PTKidsBiT ไม่มี): ชดเชยมอเตอร์, เบรก, ตัวคีบ
-    let compLeft = 0
-    let compRight = 0
-    let brakeMs = 0
-    let armUpDeg = 45
-    let armDownDeg = 110
-    let gripOpenDeg = 45
-    let gripCloseDeg = 0
-    let armStepMs = 8
-    let armNow = -1
+    let compLeft: number
+    let compRight: number
+    let brakeMs: number
+    let armUpDeg: number
+    let armDownDeg: number
+    let gripOpenDeg: number
+    let gripCloseDeg: number
+    let armStepMs: number
+    let armNow: number
+
+    let ready: boolean
+    function initState() {
+        if (ready) return
+        ready = true
+        CH = [
+            ibitReadADC.ADC0, ibitReadADC.ADC1, ibitReadADC.ADC2, ibitReadADC.ADC3,
+            ibitReadADC.ADC4, ibitReadADC.ADC5, ibitReadADC.ADC6, ibitReadADC.ADC7
+        ]
+        ON_LINE = 500
+        CENTER_COUNT = 6
+        LINE = [4095, 4095, 4095, 4095, 4095, 4095, 4095, 4095]
+        GROUND = [0, 0, 0, 0, 0, 0, 0, 0]
+        V = [0, 0, 0, 0, 0, 0, 0, 0]
+        pdFirst = 1
+        pdLast = 6
+        previousError = 0
+        lastPos = 2500
+        started = false
+        compLeft = 0
+        compRight = 0
+        brakeMs = 0
+        armUpDeg = 45
+        armDownDeg = 110
+        gripOpenDeg = 45
+        gripCloseDeg = 0
+        armStepMs = 8
+        armNow = -1
+    }
 
     // ================= ภายใน =================
 
@@ -279,6 +307,7 @@ namespace iBITRobot {
     //% speed.min=-100 speed.max=100 speed.defl=50
     //% group="Motor Control" weight=100
     export function motorWrite(motor: IR_Motor, speed: number): void {
+        initState()
         if (motor == IR_Motor.Left) drive(speed, 0)
         else drive(0, speed)
     }
@@ -291,6 +320,7 @@ namespace iBITRobot {
     //% inlineInputMode=inline
     //% group="Motor Control" weight=99
     export function motorGo(left: number, right: number): void {
+        initState()
         drive(left, right)
     }
 
@@ -301,6 +331,7 @@ namespace iBITRobot {
     //% speed.min=0 speed.max=100 speed.defl=50
     //% group="Motor Control" weight=98
     export function Turn(dir: IR_Dir, speed: number): void {
+        initState()
         if (dir == IR_Dir.Left) drive(0, speed)
         else drive(speed, 0)
     }
@@ -312,6 +343,7 @@ namespace iBITRobot {
     //% speed.min=0 speed.max=100 speed.defl=50
     //% group="Motor Control" weight=97
     export function Spin(dir: IR_Dir, speed: number): void {
+        initState()
         if (dir == IR_Dir.Left) drive(-speed, speed)
         else drive(speed, -speed)
     }
@@ -319,6 +351,7 @@ namespace iBITRobot {
     //% blockId=ir_stop block="Motor Stop"
     //% group="Motor Control" weight=96
     export function motorStop(): void {
+        initState()
         iBIT.MotorStop()
     }
 
@@ -330,6 +363,7 @@ namespace iBITRobot {
     //% inlineInputMode=inline
     //% group="Motor Control" weight=90 advanced=true
     export function motorCompensate(left: number, right: number): void {
+        initState()
         compLeft = left
         compRight = right
     }
@@ -341,6 +375,7 @@ namespace iBITRobot {
     //% ms.min=0 ms.max=200 ms.defl=0
     //% group="Motor Control" weight=89 advanced=true
     export function setBrakeTime(ms: number): void {
+        initState()
         brakeMs = ms
     }
 
@@ -353,6 +388,7 @@ namespace iBITRobot {
     //% degree.min=0 degree.max=180 degree.defl=90
     //% group="Servo Control" weight=100
     export function servoWrite(servo: IR_Servo, degree: number): void {
+        initState()
         if (servo == IR_Servo.P8) {
             iBIT.Servo(ibitServo.SV1, degree)
             armNow = degree
@@ -367,6 +403,7 @@ namespace iBITRobot {
     //% blockId=ir_servostop block="Servo Stop %servo"
     //% group="Servo Control" weight=95
     export function servoStop(servo: IR_Servo): void {
+        initState()
         if (servo == IR_Servo.P8) {
             iBIT.ServoStop(ibitServo.SV1)
             armNow = -1
@@ -383,6 +420,7 @@ namespace iBITRobot {
     //% blockId=ir_adc block="ADCRead %ch"
     //% group="Sensor and ADC" weight=100
     export function ADCRead(ch: IR_ADC): number {
+        initState()
         return raw(ch)
     }
 
@@ -392,6 +430,7 @@ namespace iBITRobot {
     //% blockId=ir_distance block="GETDistance"
     //% group="Sensor and ADC" weight=95
     export function distanceRead(): number {
+        initState()
         pins.setPull(DigitalPin.P2, PinPullMode.PullNone)
         pins.digitalWritePin(DigitalPin.P1, 0)
         control.waitMicros(2)
@@ -415,6 +454,7 @@ namespace iBITRobot {
     //% blockId=ir_calibrate block="SensorCalibrate"
     //% group="Line Follower" weight=100
     export function SensorCalibrate(): void {
+        initState()
         iBIT.MotorStop()
         serial.writeLine("")
         tone(587)
@@ -467,6 +507,7 @@ namespace iBITRobot {
     //% blockId=ir_setcolor block="SETColorLine $line|Ground $ground"
     //% group="Line Follower" weight=95
     export function ValueSensorSET(line: number[], ground: number[]): void {
+        initState()
         for (let i = 0; i < 8; i++) {
             if (i < line.length) LINE[i] = line[i]
             if (i < ground.length) GROUND[i] = ground[i]
@@ -480,6 +521,7 @@ namespace iBITRobot {
     //% blockId=ir_print block="PrintSensorValue"
     //% group="Line Follower" weight=94
     export function PrintSensorValue(): void {
+        initState()
         let s = "Sensor Value:"
         for (let i = 0; i < 8; i++) {
             s = s + " " + raw(i)
@@ -493,6 +535,7 @@ namespace iBITRobot {
     //% blockId=ir_position block="GETPosition"
     //% group="Line Follower" weight=93
     export function GETPosition(): number {
+        initState()
         readAll()
         return positionFromV()
     }
@@ -507,6 +550,7 @@ namespace iBITRobot {
     //% inlineInputMode=inline
     //% group="Line Follower" weight=90
     export function Follower(minSpeed: number, maxSpeed: number, kp: number, kd: number): void {
+        initState()
         readAll()
         pdFromV(minSpeed, maxSpeed, kp, kd)
     }
@@ -522,6 +566,7 @@ namespace iBITRobot {
     //% inlineInputMode=inline
     //% group="Line Follower" weight=85
     export function ForwardLINE(find: IR_Find, minSpeed: number, maxSpeed: number, kp: number, kd: number): void {
+        initState()
         // ช่วงที่ 1: ถ้ายืนบนแยก ให้วิ่งตรงจนพ้น แล้วเดินหน้าต่อ 20 ms
         readAll()
         while (countOnLine() >= CENTER_COUNT) {
@@ -556,6 +601,7 @@ namespace iBITRobot {
     //% inlineInputMode=inline
     //% group="Line Follower" weight=84
     export function ForwardLINECount(find: IR_Find, count: number, minSpeed: number, maxSpeed: number, kp: number, kd: number): void {
+        initState()
         let found = 0
         while (true) {
             readAll()
@@ -591,6 +637,7 @@ namespace iBITRobot {
     //% inlineInputMode=inline
     //% group="Line Follower" weight=83
     export function ForwardLINECustom(pattern: string, minSpeed: number, maxSpeed: number, kp: number, kd: number): void {
+        initState()
         let want = [2, 2, 2, 2, 2, 2, 2, 2]
         let need = 0
         for (let i = 0; i < 8; i++) {
@@ -629,6 +676,7 @@ namespace iBITRobot {
     //% inlineInputMode=inline
     //% group="Line Follower" weight=80
     export function ForwardTIME(ms: number, minSpeed: number, maxSpeed: number, kp: number, kd: number): void {
+        initState()
         let t = control.millis()
         while (control.millis() - t < ms) {
             readAll()
@@ -649,6 +697,7 @@ namespace iBITRobot {
     //% inlineInputMode=inline
     //% group="Line Follower" weight=75
     export function TurnLINE(dir: IR_Dir, speed: number, sensor: IR_TurnSensor, fastTime: number): void {
+        initState()
         let slow = 20
         let timer = control.millis()
         let s = 0
@@ -685,6 +734,7 @@ namespace iBITRobot {
     //% first.defl=IR_ADC.ADC1 last.defl=IR_ADC.ADC6
     //% group="Line Follower" weight=70 advanced=true
     export function setPDSensors(first: IR_ADC, last: IR_ADC): void {
+        initState()
         if (last > first) {
             pdFirst = first
             pdLast = last
@@ -703,6 +753,7 @@ namespace iBITRobot {
     //% inlineInputMode=inline
     //% group="Gripper" weight=100
     export function setGripper(up: number, down: number, open: number, close: number): void {
+        initState()
         armUpDeg = up
         armDownDeg = down
         gripOpenDeg = open
@@ -726,18 +777,21 @@ namespace iBITRobot {
     //% blockId=ir_armup block="Arm Up"
     //% group="Gripper" weight=95
     export function armUp(): void {
+        initState()
         moveArm(armUpDeg)
     }
 
     //% blockId=ir_armdown block="Arm Down"
     //% group="Gripper" weight=94
     export function armDown(): void {
+        initState()
         moveArm(armDownDeg)
     }
 
     //% blockId=ir_gripopen block="Grip Open"
     //% group="Gripper" weight=93
     export function gripOpen(): void {
+        initState()
         iBIT.Servo(ibitServo.SV2, gripOpenDeg)
         basic.pause(300)
     }
@@ -745,6 +799,7 @@ namespace iBITRobot {
     //% blockId=ir_gripclose block="Grip Close"
     //% group="Gripper" weight=92
     export function gripClose(): void {
+        initState()
         iBIT.Servo(ibitServo.SV2, gripCloseDeg)
         basic.pause(300)
     }
@@ -755,6 +810,7 @@ namespace iBITRobot {
     //% blockId=ir_pick block="Pick Up"
     //% group="Gripper" weight=90
     export function pickUp(): void {
+        initState()
         iBIT.MotorStop()
         gripOpen()
         armDown()
@@ -769,6 +825,7 @@ namespace iBITRobot {
     //% blockId=ir_put block="Put Down"
     //% group="Gripper" weight=89
     export function putDown(): void {
+        initState()
         iBIT.MotorStop()
         armDown()
         basic.pause(150)
@@ -786,6 +843,7 @@ namespace iBITRobot {
     //% ms.defl=8
     //% group="Gripper" weight=85 advanced=true
     export function setArmStep(ms: number): void {
+        initState()
         armStepMs = ms
     }
 }
