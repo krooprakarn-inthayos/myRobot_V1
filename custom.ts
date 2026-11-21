@@ -955,6 +955,8 @@ namespace iBITRobot {
     let navZoneMs: number
     let navZoneBackMs: number
     let navYellowMs: number
+    let navApproach: number
+    let navBrakeMs: number
 
     function initNav() {
         if (navReady) return
@@ -980,7 +982,9 @@ namespace iBITRobot {
         navSlow = 35
         navTurnSpeed = 50
         navTurnFast = 200
-        navCrossMs = 150
+        navCrossMs = 80
+        navApproach = 35
+        navBrakeMs = 40
         navStartMs = 400
         navHomeMs = 300
         navBoxStraightMs = 300
@@ -1071,8 +1075,40 @@ namespace iBITRobot {
         return path
     }
 
+    // หยุดทันที: ถอยกลับสั้น ๆ เป็นเบรก แล้วตัดมอเตอร์
+    function navStop(speed: number) {
+        if (navBrakeMs > 0) {
+            drive(-speed, -speed)
+            basic.pause(navBrakeMs)
+        }
+        iBIT.MotorStop()
+    }
+
+    // วิ่งตามเส้นผ่านทางแยก n-1 จุดด้วยความเร็วปกติ
+    // ช่วงสุดท้ายก่อนทางแยกที่จะหยุด ใช้ความเร็ว Approach แล้วเบรกทันทีที่เซนเซอร์เจอเส้นตัด
     function navFind(n: number) {
-        if (n > 0) ForwardLINECount(IR_Find.Center, n, navMin, navMax, navKp, navKd)
+        if (n <= 0) return
+        let found = 0
+        let sp = n == 1 ? navApproach : navMin
+        while (true) {
+            readAll()
+            if (junction(IR_Find.Center)) {
+                found += 1
+                if (found >= n) {
+                    navStop(sp)
+                    break
+                }
+                while (junction(IR_Find.Center)) {
+                    drive(sp, sp)
+                    basic.pause(1)
+                    readAll()
+                }
+                basic.pause(100)
+                readAll()
+                if (found >= n - 1) sp = navApproach
+            }
+            pdFromV(sp, navMax, navKp, navKd)
+        }
     }
 
     function navSlowWalk(ms: number) {
@@ -1088,7 +1124,12 @@ namespace iBITRobot {
             TurnLINE(IR_Dir.Left, navTurnSpeed, IR_TurnSensor.Center, navTurnFast)
             return
         }
-        ForwardTIME(navCrossMs, navMin, navMax, navKp, navKd)
+        // เดินหน้านิดเดียวให้แกนล้อถึงทางแยก แล้วเลี้ยว
+        if (navCrossMs > 0) {
+            drive(navApproach, navApproach)
+            basic.pause(navCrossMs)
+            navStop(navApproach)
+        }
         TurnLINE(rel == 1 ? IR_Dir.Left : IR_Dir.Right, navTurnSpeed, IR_TurnSensor.Center, navTurnFast)
     }
 
@@ -1185,7 +1226,7 @@ namespace iBITRobot {
      * การเลี้ยว: ความเร็วเลี้ยว, Fast Time และเวลาเดินต่อหลังเจอเส้นตัดก่อนเลี้ยว (ms)
      */
     //% blockId=ir_navturn block="Set Navigation Turn Speed %speed|Fast Time %fast|Cross %cross ms"
-    //% speed.defl=50 fast.defl=200 cross.defl=150
+    //% speed.defl=50 fast.defl=200 cross.defl=80
     //% inlineInputMode=inline
     //% group="Navigation" weight=85 advanced=true
     export function setNavTurn(speed: number, fast: number, cross: number): void {
@@ -1194,6 +1235,21 @@ namespace iBITRobot {
         navTurnSpeed = speed
         navTurnFast = fast
         navCrossMs = cross
+    }
+
+    /**
+     * การหยุดที่ทางแยก: Approach = ความเร็วช่วงสุดท้ายก่อนถึงทางแยกที่จะหยุด (ช้า = หยุดตรงกว่า)
+     * Brake = เวลาเบรก (ms) มาก = หยุดเร็วขึ้น ถ้ามากเกินหุ่นจะถอยกลับ
+     */
+    //% blockId=ir_navstop block="Set Navigation Junction Approach %approach|Brake %brake ms"
+    //% approach.defl=35 brake.defl=40
+    //% inlineInputMode=inline
+    //% group="Navigation" weight=88
+    export function setNavStop(approach: number, brake: number): void {
+        initState()
+        initNav()
+        navApproach = approach
+        navBrakeMs = brake
     }
 
     /**
