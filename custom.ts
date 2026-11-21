@@ -212,10 +212,17 @@ namespace iBITRobot {
         else iBIT.setMotor(ch, ibitMotor.Backward, -v)
     }
 
+    // ชดเชยความเร็วเฉพาะตอนล้อหมุน และชดเชยตามทิศ (ถอยหลังก็เร็วขึ้นเท่ากัน) สั่ง 0 ล้อหยุดจริง
+    function withComp(v: number, comp: number): number {
+        if (v == 0) return 0
+        if (v > 0) return v + comp
+        return v - comp
+    }
+
     // เหมือน motorGo ของ PTKidsBiT: บวกค่าชดเชยแล้วจำกัด -100..100
     function drive(left: number, right: number) {
-        setOne(ibitMotorCH.M1, left + compLeft)
-        setOne(ibitMotorCH.M2, right + compRight)
+        setOne(ibitMotorCH.M1, withComp(left, compLeft))
+        setOne(ibitMotorCH.M2, withComp(right, compRight))
     }
 
     // หยุด: ถ้าตั้ง Brake Time จะสั่งกลับทิศสั้น ๆ ก่อนหยุด
@@ -683,6 +690,54 @@ namespace iBITRobot {
             pdFromV(minSpeed, maxSpeed, kp, kd)
         }
         stopWithBrake(minSpeed, minSpeed)
+    }
+
+    /**
+     * ถอยหลังตรงตามเวลา (ms) แล้วเบรก ไม่ใช้เซนเซอร์
+     */
+    //% blockId=ir_backtime block="Backward Time %ms|Speed %speed"
+    //% ms.shadow="timePicker" ms.defl=300
+    //% speed.min=0 speed.max=100 speed.defl=40
+    //% inlineInputMode=inline
+    //% group="Line Follower" weight=79
+    export function BackwardTIME(ms: number, speed: number): void {
+        initState()
+        drive(-speed, -speed)
+        basic.pause(ms)
+        stopWithBrake(-speed, -speed)
+    }
+
+    /**
+     * ถอยหลังจนเซนเซอร์เจอเส้นตัด (Center / Left / Right) แล้วเบรก
+     * ระหว่างถอยปรับทิศเล็กน้อยด้วย KP ให้เซนเซอร์อยู่บนเส้น (ไม่มี KD)
+     * เหมาะกับระยะสั้นและความเร็วต่ำ เพราะเซนเซอร์อยู่หน้าล้อ ถอยไกลตัวหุ่นจะค่อย ๆ เฉียงออก
+     * ถ้าเริ่มบนเส้นตัด จะถอยพ้นเส้นนั้นก่อน
+     * หยุดแล้วแกนล้อจะเลยเส้นตัดไป ถ้าจะเลี้ยวต่อให้เดินหน้าสั้น ๆ ก่อน
+     */
+    //% blockId=ir_backfind block="Backward Find %find|Speed %speed|KP %kp"
+    //% speed.min=0 speed.max=100 speed.defl=35
+    //% kp.defl=0.01
+    //% inlineInputMode=inline
+    //% group="Line Follower" weight=78
+    export function BackwardLINE(find: IR_Find, speed: number, kp: number): void {
+        initState()
+        let n = pdLast - pdFirst + 1
+        // ถอยพ้นเส้นตัดที่ยืนอยู่
+        readAll()
+        while (junction(find)) {
+            drive(-speed, -speed)
+            readAll()
+        }
+        while (true) {
+            readAll()
+            if (junction(find)) break
+            let error = positionFromV() - (n - 1) * 500
+            // จำกัดแรงแก้ไม่เกินความเร็ว: ล้อจะไม่หมุนไปข้างหน้า หุ่นไม่หมุนวน
+            let pd = Math.constrain(kp * error, -speed, speed)
+            drive(-speed + pd, -speed - pd)
+        }
+        stopWithBrake(-speed, -speed)
+        previousError = 0
     }
 
     /**
