@@ -85,8 +85,37 @@ enum IR_Servo {
     P12
 }
 
+// จุดบนสนาม PT KidsBiT ภารกิจส่งด่วน (นับจากมุมมองยืนที่ START มองเข้าสนาม)
+// B1 B2 B3 B4 = ฝั่งซ้ายมือ (ฝั่งช่องขาว), B5 B6 B7 B8 = ฝั่งขวามือ (ฝั่งช่องดำ)
+enum NavPlace {
+    //% block="START"
+    START = 0,
+    //% block="B1"
+    B1 = 13,
+    //% block="B2"
+    B2 = 19,
+    //% block="B3"
+    B3 = 25,
+    //% block="B4"
+    B4 = 26,
+    //% block="B5"
+    B5 = 27,
+    //% block="B6"
+    B6 = 28,
+    //% block="B7"
+    B7 = 16,
+    //% block="B8"
+    B8 = 22,
+    //% block="จุดวางกล่องขาว"
+    WhiteZone = 9,
+    //% block="จุดวางกล่องดำ"
+    BlackZone = 10,
+    //% block="กล่องเหลือง"
+    Yellow = 6
+}
+
 //% color="#51cb57" icon="" block="iBIT Robot"
-//% groups='["Motor Control", "Servo Control", "Sensor and ADC", "Line Follower", "Gripper"]'
+//% groups='["Motor Control", "Servo Control", "Sensor and ADC", "Line Follower", "Gripper", "Navigation"]'
 namespace iBITRobot {
     // MakeCode อาจรันโค้ด on start ของผู้ใช้ก่อนบรรทัดตั้งค่าตัวแปรในไฟล์นี้
     // จึงประกาศตัวแปรไว้เฉยๆ แล้วตั้งค่าเริ่มต้นใน initState() ซึ่งทุกบล็อกเรียกก่อนทำงาน
@@ -900,5 +929,306 @@ namespace iBITRobot {
     export function setArmStep(ms: number): void {
         initState()
         armStepMs = ms
+    }
+
+    // ======================= Navigation: วิ่งจากจุดหนึ่งไปอีกจุดเอง =======================
+    // แผนที่สนาม (ซม. โดยประมาณจากภาพสนาม) มองจาก START: x = ไปทางกล่องเหลือง, y = ไปทางฝั่งช่องขาว
+    // node: 0 START, 1-5 ทางแยก 1-5 บนเส้นหลัก, 6 กล่องเหลือง, 7/8 ทางแยกไปช่องขาว/ดำ,
+    //       9/10 ช่องขาว/ดำ, 11-24 ทางแยกบนเส้นตั้งและแถว, 13 16 19 22 25-28 จุดวางกล่อง
+    let NX: number[]
+    let NY: number[]
+    let NB: number[][]
+    let navReady: boolean
+    let navMin: number
+    let navMax: number
+    let navKp: number
+    let navKd: number
+    let navSlow: number
+    let navTurnSpeed: number
+    let navTurnFast: number
+    let navCrossMs: number
+    let navStartMs: number
+    let navHomeMs: number
+    let navBoxStraightMs: number
+    let navBoxTurnMs: number
+    let navBoxBackMs: number
+    let navZoneMs: number
+    let navZoneBackMs: number
+    let navYellowMs: number
+
+    function initNav() {
+        if (navReady) return
+        navReady = true
+        NX = [0, 16, 36, 51, 66, 76, 84, 16, 16, 0, 0,
+            36, 36, 36, 36, 36, 36, 51, 51, 51, 51, 51, 51, 66, 66, 26, 74, 26, 74]
+        NY = [0, 0, 0, 0, 0, 0, 0, 45, -45, 45, -45,
+            22, 44, 52, -22, -44, -52, 22, 44, 52, -22, -44, -52, 22, -22, 22, 22, -22, -22]
+        let E = [0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 1, 7, 1, 8, 7, 9, 8, 10,
+            2, 11, 11, 12, 12, 13, 2, 14, 14, 15, 15, 16,
+            3, 17, 17, 18, 18, 19, 3, 20, 20, 21, 21, 22,
+            4, 23, 4, 24, 25, 11, 11, 17, 17, 23, 23, 26, 27, 14, 14, 20, 20, 24, 24, 28]
+        NB = []
+        for (let i = 0; i < 29; i++) NB.push([])
+        for (let j = 0; j < E.length; j += 2) {
+            NB[E[j]].push(E[j + 1])
+            NB[E[j + 1]].push(E[j])
+        }
+        navMin = 50
+        navMax = 100
+        navKp = 0.012
+        navKd = 0.15
+        navSlow = 35
+        navTurnSpeed = 50
+        navTurnFast = 200
+        navCrossMs = 150
+        navStartMs = 400
+        navHomeMs = 300
+        navBoxStraightMs = 300
+        navBoxTurnMs = 350
+        navBoxBackMs = 150
+        navZoneMs = 250
+        navZoneBackMs = 300
+        navYellowMs = 250
+    }
+
+    // ทิศ: 0 = ไปทางกล่องเหลือง, 1 = ไปทางช่องขาว, 2 = ไปทาง START, 3 = ไปทางช่องดำ
+    function dirOf(a: number, b: number): number {
+        if (NX[b] > NX[a]) return 0
+        if (NY[b] > NY[a]) return 1
+        if (NX[b] < NX[a]) return 2
+        return 3
+    }
+
+    function isBox(n: number): boolean {
+        return n == 13 || n == 16 || n == 19 || n == 22 || n == 25 || n == 26 || n == 27 || n == 28
+    }
+
+    function isTerminal(n: number): boolean {
+        return n == 0 || n == 6 || n == 9 || n == 10 || isBox(n)
+    }
+
+    // หาเส้นทางสั้นสุด (ระยะ + ค่าปรับเลี้ยว 15 ซม.) ห้ามกลับตัวกลางทาง ห้ามผ่านจุดปลายทางอื่น
+    function navPlan(a: number, b: number): number[] {
+        let S = 29 * 4
+        let dist: number[] = []
+        let prev: number[] = []
+        let done: boolean[] = []
+        for (let i = 0; i < S; i++) {
+            dist.push(1000000)
+            prev.push(-1)
+            done.push(false)
+        }
+        let h0 = 0
+        if (a != 0) h0 = dirOf(NB[a][0], a)
+        dist[a * 4 + h0] = 0
+        while (true) {
+            let u = -1
+            let best = 1000000
+            for (let i = 0; i < S; i++) {
+                if (!done[i] && dist[i] < best) {
+                    best = dist[i]
+                    u = i
+                }
+            }
+            if (u < 0) break
+            done[u] = true
+            let n = Math.idiv(u, 4)
+            let h = u % 4
+            if (n == b) continue
+            if (n != a && isTerminal(n)) continue
+            for (let j = 0; j < NB[n].length; j++) {
+                let v = NB[n][j]
+                let g = dirOf(n, v)
+                let rel = (g - h + 4) % 4
+                let cost = Math.abs(NX[v] - NX[n]) + Math.abs(NY[v] - NY[n])
+                if (rel == 2) {
+                    if (n != a) continue
+                    cost += 20
+                } else if (rel != 0) {
+                    cost += 15
+                }
+                let st = v * 4 + g
+                if (dist[u] + cost < dist[st]) {
+                    dist[st] = dist[u] + cost
+                    prev[st] = u
+                }
+            }
+        }
+        let end = -1
+        let best2 = 1000000
+        for (let h = 0; h < 4; h++) {
+            if (dist[b * 4 + h] < best2) {
+                best2 = dist[b * 4 + h]
+                end = b * 4 + h
+            }
+        }
+        let path: number[] = []
+        while (end >= 0) {
+            path.push(Math.idiv(end, 4))
+            end = prev[end]
+        }
+        path.reverse()
+        return path
+    }
+
+    function navFind(n: number) {
+        if (n > 0) ForwardLINECount(IR_Find.Center, n, navMin, navMax, navKp, navKd)
+    }
+
+    function navSlowWalk(ms: number) {
+        ForwardTIME(ms, navSlow, navMax, navKp, navKd)
+    }
+
+    // เลี้ยวที่ทางแยก: หุ่นอยู่ในท่า "เซนเซอร์เพิ่งเจอเส้นตัด"
+    function navTurn(h: number, g: number) {
+        let rel = (g - h + 4) % 4
+        if (rel == 0) return
+        if (rel == 2) {
+            // กลับตัว: หมุนรอบล้อทันที (ไม่เดินเข้าทางแยกก่อน) จึงไม่ไปหยุดที่เส้นแยกด้านข้าง
+            TurnLINE(IR_Dir.Left, navTurnSpeed, IR_TurnSensor.Center, navTurnFast)
+            return
+        }
+        ForwardTIME(navCrossMs, navMin, navMax, navKp, navKd)
+        TurnLINE(rel == 1 ? IR_Dir.Left : IR_Dir.Right, navTurnSpeed, IR_TurnSensor.Center, navTurnFast)
+    }
+
+    /**
+     * วิ่งจากจุดเริ่มต้นไปยังเป้าหมายเอง (สนาม PT KidsBiT ภารกิจส่งด่วน)
+     * หาเส้นทางสั้นสุด นับทางแยก และเลี้ยวให้อัตโนมัติ
+     * จุดเริ่มต้นต้องตรงกับที่หุ่นอยู่จริง: START = วางในกรอบหันเข้าสนาม,
+     * จุดอื่น = หุ่นหยุดหันหน้าเข้าหาจุดนั้น (ท่าเมื่อจบบล็อกนี้ครั้งก่อน)
+     * บล็อกนี้ไม่คีบ/ไม่วาง ให้ใส่ Pick Up / Put Down ต่อเอง
+     */
+    //% blockId=ir_navgo block="Go from %from|to %to"
+    //% from.defl=NavPlace.START to.defl=NavPlace.B1
+    //% inlineInputMode=inline
+    //% group="Navigation" weight=100
+    export function navGo(from: NavPlace, to: NavPlace): void {
+        initState()
+        initNav()
+        let a = from as number
+        let b = to as number
+        if (a == b) return
+        let path = navPlan(a, b)
+        if (path.length < 2) return
+        let k = path.length - 1
+        let h = dirOf(path[0], path[1])
+        let count = 0
+        let i = 1
+        if (a == 0) {
+            // ออกจากกรอบ START
+            navSlowWalk(navStartMs)
+        } else {
+            // ถอยออกจากจุดเดิมจนเซนเซอร์อยู่บนทางแยกแรก แล้วเลี้ยว/กลับตัวที่นั่น
+            if (a == 6) {
+                BackwardTIME(navYellowMs, navSlow)
+            } else {
+                BackwardTIME(isBox(a) ? navBoxBackMs : navZoneBackMs, navSlow)
+                BackwardLINE(IR_Find.Center, navSlow, navKp)
+            }
+            h = dirOf(path[1], path[0])
+            if (k >= 2) {
+                let g = dirOf(path[1], path[2])
+                navTurn(h, g)
+                h = g
+                i = 2
+            }
+        }
+        for (; i < k; i++) {
+            count += 1
+            let g = dirOf(path[i], path[i + 1])
+            if (g != h) {
+                navFind(count)
+                count = 0
+                navTurn(h, g)
+                h = g
+            }
+        }
+        // ถึงเป้าหมาย
+        if (b == 6) {
+            navFind(count)
+            drive(navSlow, navSlow)
+            basic.pause(navYellowMs)
+            stopWithBrake(navSlow, navSlow)
+        } else if (isBox(b)) {
+            if (count > 0) {
+                navFind(count)
+                navSlowWalk(navBoxStraightMs)
+            } else {
+                navSlowWalk(navBoxTurnMs)
+            }
+        } else {
+            // ช่องขาว/ดำ หรือ START: นับขอบกรอบเป็นเส้นตัดอีก 1 เส้น แล้วเดินเข้าไป
+            navFind(count + 1)
+            navSlowWalk(b == 0 ? navHomeMs : navZoneMs)
+        }
+    }
+
+    /**
+     * ความเร็วที่ใช้กับบล็อก Go from ... to ...
+     */
+    //% blockId=ir_navspeed block="Set Navigation Min Speed %min|Max Speed %max|KP %kp|KD %kd|Slow %slow"
+    //% min.defl=50 max.defl=100 kp.defl=0.012 kd.defl=0.15 slow.defl=35
+    //% inlineInputMode=inline
+    //% group="Navigation" weight=90
+    export function setNavSpeed(min: number, max: number, kp: number, kd: number, slow: number): void {
+        initState()
+        initNav()
+        navMin = min
+        navMax = max
+        navKp = kp
+        navKd = kd
+        navSlow = slow
+    }
+
+    /**
+     * การเลี้ยว: ความเร็วเลี้ยว, Fast Time และเวลาเดินต่อหลังเจอเส้นตัดก่อนเลี้ยว (ms)
+     */
+    //% blockId=ir_navturn block="Set Navigation Turn Speed %speed|Fast Time %fast|Cross %cross ms"
+    //% speed.defl=50 fast.defl=200 cross.defl=150
+    //% inlineInputMode=inline
+    //% group="Navigation" weight=85 advanced=true
+    export function setNavTurn(speed: number, fast: number, cross: number): void {
+        initState()
+        initNav()
+        navTurnSpeed = speed
+        navTurnFast = fast
+        navCrossMs = cross
+    }
+
+    /**
+     * เวลา (ms) ช่วงจุดวางกล่อง
+     * Straight = เข้าหากล่องหลังวิ่งผ่านเส้นตัดตรง ๆ (B1 B2 B7 B8)
+     * After Turn = เข้าหากล่องหลังเลี้ยวเข้าแถว (B3-B6)
+     * Back = ถอยออกจากกล่องก่อนเริ่มหาเส้นตัด
+     */
+    //% blockId=ir_navbox block="Set Navigation Box Straight %straight|After Turn %turn|Back %back"
+    //% straight.defl=300 turn.defl=350 back.defl=150
+    //% inlineInputMode=inline
+    //% group="Navigation" weight=80 advanced=true
+    export function setNavBox(straight: number, turn: number, back: number): void {
+        initState()
+        initNav()
+        navBoxStraightMs = straight
+        navBoxTurnMs = turn
+        navBoxBackMs = back
+    }
+
+    /**
+     * เวลา (ms): เข้าไปในช่องสี, ถอยออกจากช่องสี, ออกจาก START, เข้า START,
+     * วิ่งตรงจากขีดขวางทางแยก 5 ไปถึงกล่องเหลือง (ช่วงนี้ไม่มีเส้น)
+     */
+    //% blockId=ir_navzone block="Set Navigation Zone In %zin|Zone Back %zback|Start Out %sout|Home In %home|Yellow %yellow"
+    //% zin.defl=250 zback.defl=300 sout.defl=400 home.defl=300 yellow.defl=250
+    //% inlineInputMode=inline
+    //% group="Navigation" weight=75 advanced=true
+    export function setNavZone(zin: number, zback: number, sout: number, home: number, yellow: number): void {
+        initState()
+        initNav()
+        navZoneMs = zin
+        navZoneBackMs = zback
+        navStartMs = sout
+        navHomeMs = home
+        navYellowMs = yellow
     }
 }
