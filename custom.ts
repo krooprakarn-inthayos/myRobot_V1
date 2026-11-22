@@ -115,7 +115,7 @@ enum NavPlace {
 }
 
 //% color="#51cb57" icon="" block="iBIT Robot"
-//% groups='["Motor Control", "Servo Control", "Sensor and ADC", "Line Follower", "Gripper", "Navigation"]'
+//% groups='["Motor Control", "Servo Control", "Sensor and ADC", "Line Follower", "Gripper", "Navigation", "Stop and Retry"]'
 namespace iBITRobot {
     // MakeCode อาจรันโค้ด on start ของผู้ใช้ก่อนบรรทัดตั้งค่าตัวแปรในไฟล์นี้
     // จึงประกาศตัวแปรไว้เฉยๆ แล้วตั้งค่าเริ่มต้นใน initState() ซึ่งทุกบล็อกเรียกก่อนทำงาน
@@ -146,6 +146,10 @@ namespace iBITRobot {
     let armStepMs: number
     let armNow: number
 
+    // ปุ่มหยุดฉุกเฉิน: กด A หรือ B ระหว่างหุ่นเคลื่อนที่ = หยุดทุกคำสั่งที่เหลือ (ไม่ต้อง Calibrate ใหม่)
+    let stopped: boolean
+    let stopEnabled: boolean
+
     let ready: boolean
     function initState() {
         if (ready) return
@@ -173,6 +177,8 @@ namespace iBITRobot {
         gripCloseDeg = 0
         armStepMs = 8
         armNow = -1
+        stopped = false
+        stopEnabled = true
     }
 
     // ================= ภายใน =================
@@ -249,14 +255,36 @@ namespace iBITRobot {
     }
 
     // เหมือน motorGo ของ PTKidsBiT: บวกค่าชดเชยแล้วจำกัด -100..100
+    // ตรวจปุ่มหยุด (อ่านสถานะปุ่มตรง ๆ ใช้ได้แม้อยู่ในลูปที่ไม่ได้พัก)
+    function checkStop(): boolean {
+        if (!stopped && stopEnabled && (input.buttonIsPressed(Button.A) || input.buttonIsPressed(Button.B))) {
+            stopped = true
+            iBIT.MotorStop()
+        }
+        return stopped
+    }
+
+    // พักแบบตรวจปุ่มหยุดไปด้วย
+    function waitMs(ms: number) {
+        let t = control.millis()
+        while (control.millis() - t < ms) {
+            if (checkStop()) return
+            basic.pause(5)
+        }
+    }
+
     function drive(left: number, right: number) {
+        if (checkStop()) {
+            iBIT.MotorStop()
+            return
+        }
         setOne(ibitMotorCH.M1, withComp(left, compLeft))
         setOne(ibitMotorCH.M2, withComp(right, compRight))
     }
 
     // หยุด: ถ้าตั้ง Brake Time จะสั่งกลับทิศสั้น ๆ ก่อนหยุด
     function stopWithBrake(left: number, right: number) {
-        if (brakeMs > 0) {
+        if (brakeMs > 0 && !stopped) {
             drive(-left, -right)
             basic.pause(brakeMs)
         }
@@ -605,7 +633,7 @@ namespace iBITRobot {
         initState()
         // ช่วงที่ 1: ถ้ายืนบนแยก ให้วิ่งตรงจนพ้น แล้วเดินหน้าต่อ 20 ms
         readAll()
-        while (countOnLine() >= CENTER_COUNT) {
+        while (countOnLine() >= CENTER_COUNT && !stopped) {
             drive(minSpeed, minSpeed)
             basic.pause(1)
             readAll()
@@ -613,7 +641,7 @@ namespace iBITRobot {
         drive(50, 50)
         basic.pause(20)
         // ช่วงที่ 2: วิ่งตามเส้นจนเจอแยก แล้วเดินหน้าต่อ 20 ms ก่อนหยุด
-        while (true) {
+        while (!stopped) {
             readAll()
             if (junction(find)) {
                 drive(50, 50)
@@ -639,7 +667,7 @@ namespace iBITRobot {
     export function ForwardLINECount(find: IR_Find, count: number, minSpeed: number, maxSpeed: number, kp: number, kd: number): void {
         initState()
         let found = 0
-        while (true) {
+        while (!stopped) {
             readAll()
             if (junction(find)) {
                 found += 1
@@ -648,12 +676,12 @@ namespace iBITRobot {
                     break
                 }
                 // ยังไม่ครบ: วิ่งตรงจนพ้นแยก แล้ววิ่งต่ออีก 100 ms
-                while (junction(find)) {
+                while (junction(find) && !stopped) {
                     drive(minSpeed, minSpeed)
                     basic.pause(1)
                     readAll()
                 }
-                basic.pause(100)
+                waitMs(100)
                 readAll()
             }
             pdFromV(minSpeed, maxSpeed, kp, kd)
@@ -686,7 +714,7 @@ namespace iBITRobot {
                 need += 1
             }
         }
-        while (true) {
+        while (!stopped) {
             readAll()
             let match = 0
             for (let i = 0; i < 8; i++) {
@@ -714,7 +742,7 @@ namespace iBITRobot {
     export function ForwardTIME(ms: number, minSpeed: number, maxSpeed: number, kp: number, kd: number): void {
         initState()
         let t = control.millis()
-        while (control.millis() - t < ms) {
+        while (control.millis() - t < ms && !stopped) {
             readAll()
             pdFromV(minSpeed, maxSpeed, kp, kd)
         }
@@ -732,7 +760,7 @@ namespace iBITRobot {
     export function BackwardTIME(ms: number, speed: number): void {
         initState()
         drive(-speed, -speed)
-        basic.pause(ms)
+        waitMs(ms)
         stopWithBrake(-speed, -speed)
     }
 
@@ -753,11 +781,11 @@ namespace iBITRobot {
         let n = pdLast - pdFirst + 1
         // ถอยพ้นเส้นตัดที่ยืนอยู่
         readAll()
-        while (junction(find)) {
+        while (junction(find) && !stopped) {
             drive(-speed, -speed)
             readAll()
         }
-        while (true) {
+        while (!stopped) {
             readAll()
             if (junction(find)) break
             let error = positionFromV() - (n - 1) * 500
@@ -782,11 +810,12 @@ namespace iBITRobot {
     //% group="Line Follower" weight=75
     export function TurnLINE(dir: IR_Dir, speed: number, sensor: IR_TurnSensor, fastTime: number): void {
         initState()
+        if (stopped) return
         let slow = 20
         let timer = control.millis()
         let s = 0
         // ช่วงที่ 1: หมุนจนเซนเซอร์กลาง 4 ตัว (ADC2–ADC5) พ้นเส้นเดิม
-        while (true) {
+        while (!stopped) {
             readAll()
             if (!(onLine(2) || onLine(3) || onLine(4) || onLine(5))) break
             s = timer + fastTime - control.millis()
@@ -796,7 +825,7 @@ namespace iBITRobot {
             else drive(s, -s)
         }
         // ช่วงที่ 2: หมุนจน Sensor ที่เลือกเจอเส้น
-        while (true) {
+        while (!stopped) {
             readAll()
             if (turnSensorOnLine(sensor)) break
             s = timer + fastTime - control.millis()
@@ -895,6 +924,7 @@ namespace iBITRobot {
     //% group="Gripper" weight=90
     export function pickUp(): void {
         initState()
+        if (stopped) return
         iBIT.MotorStop()
         gripOpen()
         armDown()
@@ -910,6 +940,7 @@ namespace iBITRobot {
     //% group="Gripper" weight=89
     export function putDown(): void {
         initState()
+        if (stopped) return
         iBIT.MotorStop()
         armDown()
         basic.pause(150)
@@ -1077,7 +1108,7 @@ namespace iBITRobot {
 
     // หยุดทันที: ถอยกลับสั้น ๆ เป็นเบรก แล้วตัดมอเตอร์
     function navStop(speed: number) {
-        if (navBrakeMs > 0) {
+        if (navBrakeMs > 0 && !stopped) {
             drive(-speed, -speed)
             basic.pause(navBrakeMs)
         }
@@ -1090,7 +1121,7 @@ namespace iBITRobot {
         if (n <= 0) return
         let found = 0
         let sp = n == 1 ? navApproach : navMin
-        while (true) {
+        while (!stopped) {
             readAll()
             if (junction(IR_Find.Center)) {
                 found += 1
@@ -1098,12 +1129,12 @@ namespace iBITRobot {
                     navStop(sp)
                     break
                 }
-                while (junction(IR_Find.Center)) {
+                while (junction(IR_Find.Center) && !stopped) {
                     drive(sp, sp)
                     basic.pause(1)
                     readAll()
                 }
-                basic.pause(100)
+                waitMs(100)
                 readAll()
                 if (found >= n - 1) sp = navApproach
             }
@@ -1127,7 +1158,7 @@ namespace iBITRobot {
         // เดินหน้านิดเดียวให้แกนล้อถึงทางแยก แล้วเลี้ยว
         if (navCrossMs > 0) {
             drive(navApproach, navApproach)
-            basic.pause(navCrossMs)
+            waitMs(navCrossMs)
             navStop(navApproach)
         }
         TurnLINE(rel == 1 ? IR_Dir.Left : IR_Dir.Right, navTurnSpeed, IR_TurnSensor.Center, navTurnFast)
@@ -1146,6 +1177,7 @@ namespace iBITRobot {
     //% group="Navigation" weight=100
     export function navGo(from: NavPlace, to: NavPlace): void {
         initState()
+        if (stopped) return
         initNav()
         let a = from as number
         let b = to as number
@@ -1176,6 +1208,7 @@ namespace iBITRobot {
             }
         }
         for (; i < k; i++) {
+            if (stopped) return
             count += 1
             let g = dirOf(path[i], path[i + 1])
             if (g != h) {
@@ -1186,10 +1219,11 @@ namespace iBITRobot {
             }
         }
         // ถึงเป้าหมาย
+        if (stopped) return
         if (b == 6) {
             navFind(count)
             drive(navSlow, navSlow)
-            basic.pause(navYellowMs)
+            waitMs(navYellowMs)
             stopWithBrake(navSlow, navSlow)
         } else if (isBox(b)) {
             if (count > 0) {
@@ -1286,5 +1320,45 @@ namespace iBITRobot {
         navStartMs = sout
         navHomeMs = home
         navYellowMs = yellow
+    }
+
+    // ======================= Stop and Retry =======================
+
+    /**
+     * เปิด/ปิดปุ่มหยุดฉุกเฉิน (ค่าเริ่มต้น เปิด)
+     * เปิดอยู่: กด A หรือ B ระหว่างหุ่นเคลื่อนที่ = หุ่นหยุด และคำสั่งเคลื่อนที่ที่เหลือทั้งหมดจะถูกข้าม
+     * ค่า Calibrate ยังอยู่ ใช้ Clear Stop แล้วออกตัวใหม่ได้เลย
+     */
+    //% blockId=ir_stopenable block="Set Stop Button %on"
+    //% on.shadow="toggleOnOff" on.defl=true
+    //% group="Stop and Retry" weight=100
+    export function setStopButton(on: boolean): void {
+        initState()
+        stopEnabled = on
+    }
+
+    /**
+     * true = หุ่นถูกหยุดด้วยปุ่มหยุดฉุกเฉิน
+     */
+    //% blockId=ir_isstopped block="Is Stopped"
+    //% group="Stop and Retry" weight=95
+    export function isStopped(): boolean {
+        initState()
+        return stopped
+    }
+
+    /**
+     * ล้างสถานะหยุด ให้หุ่นเคลื่อนที่ได้อีก (ใส่ก่อนออกตัวทุกครั้ง)
+     * รอให้ปล่อยปุ่ม A และ B ก่อน กันหุ่นหยุดซ้ำทันที
+     */
+    //% blockId=ir_clearstop block="Clear Stop"
+    //% group="Stop and Retry" weight=90
+    export function clearStop(): void {
+        initState()
+        while (input.buttonIsPressed(Button.A) || input.buttonIsPressed(Button.B)) {
+            basic.pause(10)
+        }
+        stopped = false
+        previousError = 0
     }
 }
